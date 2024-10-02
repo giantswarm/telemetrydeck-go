@@ -4,4 +4,4 @@
 
 **The development on this project has just started. Please don't expect anything to work until there are a few releases.**
 
-The Goal of this library is to facilitate sending telemetry data to the TelemetryDeck backend.
+The Goal of this library is to facilitate sending telemetry data to the [TelemetryDeck](https://telemetrydeck.com/) backend.
