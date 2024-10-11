@@ -78,6 +78,9 @@ type Client struct {
 	// The HTTP client we use to submit our data to the TelemetryDeck API.
 	httpClient *http.Client
 
+	// Logger used to log errors.
+	logger *log.Logger
+
 	appID      string
 	endpoint   string
 	hashSalt   string
@@ -127,6 +130,17 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 func WithEndpoint(endpoint string) func(*Client) {
 	return func(c *Client) {
 		c.endpoint = endpoint
+	}
+}
+
+// WithLogger specifies a logger to use for logging errors
+// caught during sending telemetry signals. If not given,
+// these errors will be ignored.
+//
+// To be used as an option parameter in the NewClient() func.
+func WithLogger(logger *log.Logger) func(*Client) {
+	return func(c *Client) {
+		c.logger = logger
 	}
 }
 
@@ -246,6 +260,10 @@ func generateUserId() (id string) {
 // case letter and any namespaced beginning with an uppercase letter."
 //
 // The payload is a map of key-value pairs, containing the data you want to send.
+//
+// Errors that occur during submission of the request to TelemetryDeck are not
+// returned. Instead they are printed if the client has been configured with a logger
+// (see WithLogger).
 func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[string]interface{}) error {
 	if signalType == "" {
 		return ErrNoSignalType
@@ -280,23 +298,26 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 	if err != nil {
 		return err
 	}
-
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	if c.testMode && response.StatusCode >= 400 {
-		log.Printf("response status: %d", response.StatusCode)
-		log.Printf("request body: %s", b)
-		bodyBytes, err := io.ReadAll(response.Body)
-		if err == nil {
-			log.Printf("details: %s", string(bodyBytes))
+	go func(r *http.Request) {
+		response, err := c.httpClient.Do(request)
+		if err != nil {
+			if c.logger != nil {
+				c.logger.Printf("error submitting HTTP request: %s", err)
+			}
 		}
-	}
+		defer response.Body.Close()
+
+		if response.StatusCode >= 400 && c.testMode && c.logger != nil {
+			c.logger.Printf("response status: %d", response.StatusCode)
+			c.logger.Printf("request body: %s", b)
+			bodyBytes, err := io.ReadAll(response.Body)
+			if err == nil {
+				c.logger.Printf("response body: %s", string(bodyBytes))
+			}
+		}
+	}(request)
 
 	return nil
 }
