@@ -134,7 +134,8 @@ func WithEndpoint(endpoint string) func(*Client) {
 }
 
 // WithLogger specifies a logger to use for logging errors
-// caught during sending telemetry signals.
+// caught during sending telemetry signals. If not given,
+// these errors will be ignored.
 //
 // To be used as an option parameter in the NewClient() func.
 func WithLogger(logger *log.Logger) func(*Client) {
@@ -259,6 +260,10 @@ func generateUserId() (id string) {
 // case letter and any namespaced beginning with an uppercase letter."
 //
 // The payload is a map of key-value pairs, containing the data you want to send.
+//
+// Errors that occur during submission of the request to TelemetryDeck are not
+// returned. Instead they are printed if the client has been configured with a logger
+// (see WithLogger).
 func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[string]interface{}) error {
 	if signalType == "" {
 		return ErrNoSignalType
