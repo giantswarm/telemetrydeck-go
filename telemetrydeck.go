@@ -121,15 +121,16 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 	return client, nil
 }
 
-// WithEndpoint Specify an alternative API endpoint. This is mainly useful for testing.
-// To be used as an option parameter in the NewClient() func.
+// WithEndpoint allows to specify an alternative API endpoint.
+// This is mainly useful for testing. To be used as an option
+// parameter in the NewClient() func.
 func WithEndpoint(endpoint string) func(*Client) {
 	return func(c *Client) {
 		c.endpoint = endpoint
 	}
 }
 
-// WithHashSalt Specify a hash salt string (recommended)
+// WithHashSalt specifies a hash salt string (recommended).
 //
 // This salt will be appended to the user identifier before it
 // gets hashed and submitted to TelemetryDeck. This makes it
@@ -146,7 +147,7 @@ func WithHashSalt(salt string) func(*Client) {
 	}
 }
 
-// WithUserID Specify a unique user identifier.
+// WithUserID specifies a unique user identifier.
 //
 // The identifier will be salted and hashed before
 // submitting to the TelemetryDeck API.
@@ -161,7 +162,7 @@ func WithUserID(userID string) func(*Client) {
 	}
 }
 
-// WithSessionID Specify a session identifier. This should be the same value for
+// WithSessionID specifies a session identifier. This should be the same value for
 // the same session/user combination. If not given, a UUID will be
 // generated at the creation of the client.
 //
@@ -172,7 +173,9 @@ func WithSessionID(sessionID string) func(*Client) {
 	}
 }
 
-// WithTestMode When set, data will be sent with isTestMode=true, to avoid
+// WithTestMode activates test mode.
+//
+// When set, data will be sent with isTestMode=true, to avoid
 // polluting production data. Also, errors will be logged that
 // would otherwise be silently ignored.
 //
@@ -233,7 +236,7 @@ func generateUserId() (id string) {
 	return id
 }
 
-// SendSignal Send a signal to the TelemetryDeck backend.
+// SendSignal sends a signal to the TelemetryDeck backend.
 //
 // The signalType is a string of your choice, identifying the type of the signal
 // you are sending, e.g. "command". From the TelemetryDeck docs:
