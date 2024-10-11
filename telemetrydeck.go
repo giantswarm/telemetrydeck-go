@@ -1,3 +1,4 @@
+// Package telemetrydeck
 /*
 A library to send telemetry data to TelemetryDeck.
 
@@ -120,24 +121,22 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 	return client, nil
 }
 
-// Specify an alternative API endpoint. This is mainly useful
-// for testing.
-//
-// To be used as an option paramter in the NewClient() func.
+// WithEndpoint Specify an alternative API endpoint. This is mainly useful for testing.
+// To be used as an option parameter in the NewClient() func.
 func WithEndpoint(endpoint string) func(*Client) {
 	return func(c *Client) {
 		c.endpoint = endpoint
 	}
 }
 
-// Specify a hash salt string (recommended)
+// WithHashSalt Specify a hash salt string (recommended)
 //
 // This salt will be appended to the user identifier before it
 // gets hashed and submitted to TelemetryDeck. This makes it
-// a lot harder to de-anonymize user ID hashes, e. g. via some
+// a lot harder to de-anonymize user ID hashes, e.g. via some
 // rainbow tables.
 //
-// To be used as an option paramter in the NewClient() func.
+// To be used as an option parameter in the NewClient() func.
 func WithHashSalt(salt string) func(*Client) {
 	return func(c *Client) {
 		c.hashSalt = salt
@@ -147,15 +146,14 @@ func WithHashSalt(salt string) func(*Client) {
 	}
 }
 
-// Specify a unique user identifier.
+// WithUserID Specify a unique user identifier.
 //
 // The identifier will be salted and hashed before
 // submitting to the TelemetryDeck API.
 //
-// If no unique user ID is specific, an identifier
-// is generated.
+// If no unique user ID is specific, an identifier is generated.
 //
-// To be used as an option paramter in the NewClient() func.
+// To be used as an option parameter in the NewClient() func.
 func WithUserID(userID string) func(*Client) {
 	return func(c *Client) {
 		c.userID = userID
@@ -163,22 +161,22 @@ func WithUserID(userID string) func(*Client) {
 	}
 }
 
-// Specify a session identifier. This should be the same value for
+// WithSessionID Specify a session identifier. This should be the same value for
 // the same session/user combination. If not given, a UUID will be
 // generated at the creation of the client.
 //
-// To be used as an option paramter in the NewClient() func.
+// To be used as an option parameter in the NewClient() func.
 func WithSessionID(sessionID string) func(*Client) {
 	return func(c *Client) {
 		c.sessionID = sessionID
 	}
 }
 
-// When set, data will be send with isTestMode=true, to avoid
-// polluting production data. Also errors will be logged that
+// WithTestMode When set, data will be sent with isTestMode=true, to avoid
+// polluting production data. Also, errors will be logged that
 // would otherwise be silently ignored.
 //
-// To be used as an option paramter in the NewClient() func.
+// To be used as an option parameter in the NewClient() func.
 func WithTestMode() func(*Client) {
 	return func(c *Client) {
 		c.testMode = true
@@ -235,10 +233,10 @@ func generateUserId() (id string) {
 	return id
 }
 
-// Send a signal to the TelemetryDeck backend.
+// SendSignal Send a signal to the TelemetryDeck backend.
 //
 // The signalType is a string of your choice, identifying the type of the signal
-// you are sending, e. g. "command". From the TelemetryDeck docs:
+// you are sending, e.g. "command". From the TelemetryDeck docs:
 //
 // "While it is not enforced, we recommend structuring your signal names in
 // namespaces separated by dots, with the signal type beginning with a lower
