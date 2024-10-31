@@ -323,3 +323,13 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 
 	return nil
 }
+
+// Returns the user ID set in the client (unhashed).
+func (c *Client) UserID() string {
+	return c.userID
+}
+
+// Returns the user ID hash set in the client.
+func (c *Client) UserIDHash() string {
+	return c.userIDHash
+}
