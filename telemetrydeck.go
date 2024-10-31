@@ -291,35 +291,43 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 	// Body must be an array of signals. We only send one signal at a time.
 	signals := []SignalBody{*signal}
 
-	b, err := json.Marshal(signals)
+	body, err := json.Marshal(signals)
 	if err != nil {
 		return err
 	}
 
-	request, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewBuffer(b))
+	request, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-	go func(r *http.Request) {
+	go func() {
 		response, err := c.httpClient.Do(request)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Printf("error submitting HTTP request: %s", err)
 			}
 		}
-		defer response.Body.Close()
+		if response == nil {
+			if c.logger != nil {
+				c.logger.Printf("warning - telemetrydeck.Client.SendSignal resulted in no response")
+			}
+			return
+		}
+		if response.Body != nil {
+			defer response.Body.Close()
+		}
 
 		if response.StatusCode >= 400 && c.testMode && c.logger != nil {
 			c.logger.Printf("response status: %d", response.StatusCode)
-			c.logger.Printf("request body: %s", b)
+			c.logger.Printf("request body: %s", body)
 			bodyBytes, err := io.ReadAll(response.Body)
 			if err == nil {
 				c.logger.Printf("response body: %s", string(bodyBytes))
 			}
 		}
-	}(request)
+	}()
 
 	return nil
 }
