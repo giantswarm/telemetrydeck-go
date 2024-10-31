@@ -108,11 +108,13 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 	}
 
 	// Create client with defaults
+	defaultUid := generateUserId()
 	client := &Client{
 		appID:      appID,
 		endpoint:   endpoint,
-		userID:     generateUserId(),
 		sessionID:  uuid.New().String(),
+		userID:     defaultUid,
+		userIDHash: hashUserId(defaultUid, ""),
 		httpClient: &http.Client{},
 	}
 
