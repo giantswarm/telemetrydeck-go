@@ -1,0 +1,30 @@
+name: "Go coverage report"
+on:
+  pull_request:
+  push:
+    branches:
+      - fix-default-uid-hash # TODO: remove before merging
+      # It's important that the action also runs on merge to main
+      - main
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clone repository
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        # default fetch-depth is insufficent to find previous coverage notes
+        fetch-depth: 10
+
+    - name: Create coverage report
+      uses: gwatts/go-coverage-action@2845595538a59d63d1bf55f109c14e104c6f7cb3 # v2.0.0
+      id: coverage
+      env:
+          GITHUB_TOKEN: "${{ secrets.TAYLORBOT_GITHUB_ACTION }}"
+      with:
+        # use fail-coverage to determine what should happen below this threshold
+        fail-coverage: 1
+
+        # collect coverage for all packages beyond the one under test
+        cover-pkg: ./...
