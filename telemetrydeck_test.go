@@ -64,6 +64,54 @@ func TestClient_SendSignal(t *testing.T) {
 	}
 }
 
+func Test_generateUserId(t *testing.T) {
+	gotId := generateUserId()
+	t.Logf("generateUserId(): %q", gotId)
+	if gotId == "" {
+		t.Errorf("generateUserId() returned empty string")
+	}
+}
+
+func Test_UserIdHashingWithSalt(t *testing.T) {
+	userID := "somebody@example.com"
+	salt := "MySalt"
+	expectedHash := "c05dc5334d83cca7382bca040f2f6e9de56d57d22814cfc4c39b5a55dbc9ef16" // sha256 -s "somebody@example.comMySalt"
+
+	client, err := NewClient("my-app-id", WithUserID(userID), WithHashSalt(salt))
+	if err != nil {
+		t.Fatalf("unexpected error when creating the client: %s", err)
+	}
+
+	hash := hashUserId(userID, salt)
+
+	if hash != expectedHash {
+		t.Errorf("hashUserId() did not return the expected hash. got %q, expected %q", hash, expectedHash)
+	}
+	if client.userIDHash != expectedHash {
+		t.Errorf("client.userIDHash wasn't the expected value. got %q, expected %q", client.userIDHash, expectedHash)
+	}
+}
+
+func Test_UserIdHashingWithoutSalt(t *testing.T) {
+	userID := "somebody@example.com"
+	salt := ""
+	expectedHash := "787d5b7c06ca0a21c96436cc7c8117e6fe046d0fd7dedcae8c93bfc14b8e5df7" // sha256 -s "somebody@example.com"
+
+	client, err := NewClient("my-app-id", WithUserID(userID))
+	if err != nil {
+		t.Fatalf("unexpected error when creating the client: %s", err)
+	}
+
+	hash := hashUserId(userID, salt)
+
+	if hash != expectedHash {
+		t.Errorf("hashUserId() did not return the expected hash. got %q, expected %q", hash, expectedHash)
+	}
+	if client.userIDHash != expectedHash {
+		t.Errorf("client.userIDHash wasn't the expected value. got %q, expected %q", client.userIDHash, expectedHash)
+	}
+}
+
 func ExampleNewClient() {
 	client, err := NewClient("my-app-id", WithUserID("somebody@example.com"), WithHashSalt("mySalt"))
 	if err != nil {
