@@ -316,7 +316,7 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 			return
 		}
 		if response.Body != nil {
-			defer response.Body.Close()
+			defer func() { _ = response.Body.Close() }()
 		}
 
 		if response.StatusCode >= 400 && c.testMode && c.logger != nil {
