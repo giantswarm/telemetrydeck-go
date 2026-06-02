@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3](https://github.com/giantswarm/telemetrydeck-go/compare/v0.1.2...v0.1.3) (2026-06-02)
+
+
+### Changed
+
+* **deps:** update dependency architect to v9.0.1 ([#87](https://github.com/giantswarm/telemetrydeck-go/issues/87)) ([023282e](https://github.com/giantswarm/telemetrydeck-go/commit/023282e74a17115ce66af35d5ee1735853d72720))
+
 ## [0.1.2](https://github.com/giantswarm/telemetrydeck-go/compare/v0.1.1...v0.1.2) (2026-06-01)
 
 
