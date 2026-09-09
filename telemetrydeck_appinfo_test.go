@@ -32,12 +32,22 @@ func capture(t *testing.T) (*httptest.Server, <-chan []SignalBody) {
 	return srv, got
 }
 
-func send(t *testing.T, srv *httptest.Server, got <-chan []SignalBody, opts ...func(*Client)) map[string]interface{} {
+// testAppID is the app the tests send under; nothing reaches TelemetryDeck.
+const testAppID = "11111111-2222-3333-4444-555555555555"
+
+// newTestClient builds a client that sends to srv.
+func newTestClient(t *testing.T, srv *httptest.Server, opts ...func(*Client)) *Client {
 	t.Helper()
-	c, err := NewClient("11111111-2222-3333-4444-555555555555", append(opts, WithEndpoint(srv.URL))...)
+	c, err := NewClient(testAppID, append(opts, WithEndpoint(srv.URL))...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return c
+}
+
+func send(t *testing.T, srv *httptest.Server, got <-chan []SignalBody, opts ...func(*Client)) map[string]interface{} {
+	t.Helper()
+	c := newTestClient(t, srv, opts...)
 	if err := c.SendSignal(context.Background(), "TestNamespace.command", map[string]interface{}{"appVersion": "legacy"}); err != nil {
 		t.Fatal(err)
 	}
