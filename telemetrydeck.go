@@ -54,6 +54,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -64,7 +65,21 @@ const (
 	// The TelemetryDeck Ingest v2 API endpoint we use
 	endpoint = "https://nom.telemetrydeck.com/v2/"
 
-	version = "telemetrydeck-go/0.0.1" // TODO: set this version via linker flags
+	// modulePath is this library's module path, looked up in the consuming
+	// binary's build info to report which version of the SDK sent a signal.
+	modulePath = "github.com/giantswarm/telemetrydeck-go"
+
+	// Parameter names in TelemetryDeck's reserved namespace. The SDKs set
+	// these on every signal, and the dashboard's standard insights read them:
+	// the Overview's "App Versions" chart breaks down by AppInfo.version,
+	// its "Builds" view by AppInfo.buildNumber. A custom payload key such
+	// as the legacy "appVersion" is not picked up by those insights.
+	paramOperatingSystem       = "TelemetryDeck.Device.operatingSystem"
+	paramArchitecture          = "TelemetryDeck.Device.architecture"
+	paramSDKNameAndVersion     = "TelemetryDeck.SDK.nameAndVersion"
+	paramAppVersion            = "TelemetryDeck.AppInfo.version"
+	paramBuildNumber           = "TelemetryDeck.AppInfo.buildNumber"
+	paramVersionAndBuildNumber = "TelemetryDeck.AppInfo.versionAndBuildNumber"
 )
 
 var (
@@ -81,13 +96,16 @@ type Client struct {
 	// Logger used to log errors.
 	logger *log.Logger
 
-	appID      string
-	endpoint   string
-	hashSalt   string
-	userID     string
-	userIDHash string
-	sessionID  string
-	testMode   bool
+	appID       string
+	endpoint    string
+	hashSalt    string
+	userID      string
+	userIDHash  string
+	sessionID   string
+	testMode    bool
+	appVersion  string
+	buildNumber string
+	sdkVersion  string
 }
 
 type SignalBody struct {
@@ -116,6 +134,7 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 		userID:     defaultUid,
 		userIDHash: hashUserId(defaultUid, ""),
 		httpClient: &http.Client{},
+		sdkVersion: sdkNameAndVersion(),
 	}
 
 	// Apply options overriding defaults
@@ -186,6 +205,34 @@ func WithUserID(userID string) func(*Client) {
 func WithSessionID(sessionID string) func(*Client) {
 	return func(c *Client) {
 		c.sessionID = sessionID
+	}
+}
+
+// WithAppVersion records the version of the application that sends the
+// signals, e.g. "1.4.2" or "v0.23.3". It is sent with every signal as
+// TelemetryDeck.AppInfo.version, the parameter the TelemetryDeck SDKs set and
+// the dashboard's standard "App Versions" insight breaks down by. A version
+// carried only in a custom payload key (such as "appVersion") does not show
+// up there. An empty version sends nothing.
+//
+// To be used as an option parameter in the NewClient() func.
+func WithAppVersion(version string) func(*Client) {
+	return func(c *Client) {
+		c.appVersion = version
+	}
+}
+
+// WithBuildNumber records the build identifier of the application, e.g. a
+// CI build number or the git commit. It is sent with every signal as
+// TelemetryDeck.AppInfo.buildNumber (the "Builds" view of the dashboard's
+// "App Versions" insight); together with WithAppVersion it also fills
+// TelemetryDeck.AppInfo.versionAndBuildNumber ("<version> <build>"). An empty
+// build number sends nothing.
+//
+// To be used as an option parameter in the NewClient() func.
+func WithBuildNumber(buildNumber string) func(*Client) {
+	return func(c *Client) {
+		c.buildNumber = buildNumber
 	}
 }
 
@@ -275,9 +322,18 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 		payload = make(map[string]interface{})
 	}
 	// Inject standard fields into the payload
-	payload["TelemetryDeck.Device.operatingSystem"] = runtime.GOOS
-	payload["TelemetryDeck.Device.architecture"] = runtime.GOARCH
-	payload["TelemetryDeck.SDK.nameAndVersion"] = version
+	payload[paramOperatingSystem] = runtime.GOOS
+	payload[paramArchitecture] = runtime.GOARCH
+	payload[paramSDKNameAndVersion] = c.sdkVersion
+	if c.appVersion != "" {
+		payload[paramAppVersion] = c.appVersion
+	}
+	if c.buildNumber != "" {
+		payload[paramBuildNumber] = c.buildNumber
+	}
+	if c.appVersion != "" && c.buildNumber != "" {
+		payload[paramVersionAndBuildNumber] = c.appVersion + " " + c.buildNumber
+	}
 
 	signal := &SignalBody{
 		AppID:      c.appID,
@@ -330,6 +386,32 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 	}()
 
 	return nil
+}
+
+// sdkNameAndVersion is the TelemetryDeck.SDK.nameAndVersion value:
+// "telemetrydeck-go/<version>", with the version this library was built into
+// the consuming binary at (from the module build info, so `go install` and
+// `go build` both report the real module version). "telemetrydeck-go/dev"
+// when the build info has no entry for it (e.g. this library's own tests).
+func sdkNameAndVersion() string {
+	const name = "telemetrydeck-go/"
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return name + "dev"
+	}
+	for _, dep := range info.Deps {
+		if dep.Path != modulePath {
+			continue
+		}
+		if dep.Replace != nil {
+			dep = dep.Replace
+		}
+		// A directory replace records "(devel)"; that is a dev build too.
+		if v := dep.Version; v != "" && v != "(devel)" {
+			return name + strings.TrimPrefix(v, "v")
+		}
+	}
+	return name + "dev"
 }
 
 // Returns the user ID set in the client (unhashed).
