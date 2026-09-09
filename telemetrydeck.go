@@ -1,44 +1,28 @@
-// Package telemetrydeck
-/*
-A library to send telemetry data to TelemetryDeck.
-
-Usage synopsis
-
-	import "github.com/giantswarm/telemetrydeck-go" // imported as telemetrydeck
-
-	// Represents an event we want to track
-	type MySignal struct {
-		// Some arbitrary string
-		Command string
-	}
-
-	func myfunc() {
-		// This is required!
-		appID := os.Getenv("TELEMETRY_APP_ID")
-
-		// This is recommended
-		salt := os.Getenv("TELEMETRY_USER_HASH_SALT")
-
-		// A unique user identifier, if desired
-		email := ...
-
-		// Create new client
-		client, err := telemetrydeck.NewClient(appID).WithUserID(email).WithHashSalt(salt)
-		if err != nil {
-			panic(err)
-		}
-
-		// Define and transmit event to track
-		signalPayload := map[string]interface{
-			"command": "create",
-		}
-		signalType := "MyNamespace.mySignalType"
-		err = client.SendSignal(context.Background(), signalType, signalPayload)
-		if err != nil {
-			panic(err)
-		}
-	}
-*/
+// Package telemetrydeck sends anonymous usage signals to TelemetryDeck
+// through its Ingest API v2.
+//
+// A Client stands for one application (the app ID) used by one user in one
+// session. SendSignal hands a signal to a goroutine and returns at once, so
+// delivery overlaps the program's own work; Flush bounds the wait for that
+// delivery before the process exits, and SendSignalSync sends in the caller's
+// goroutine instead:
+//
+//	client, err := telemetrydeck.NewClient(appID,
+//	    telemetrydeck.WithAppVersion(version),
+//	)
+//	if err != nil {
+//	    return err
+//	}
+//	_ = client.SendSignal(ctx, "MyNamespace.command", map[string]interface{}{
+//	    "command": "create",
+//	})
+//	// ... the command's own work ...
+//	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+//	defer cancel()
+//	_ = client.Flush(ctx)
+//
+// The user identifier leaves the machine only as a salted SHA-256 hash, see
+// WithUserID and WithHashSalt.
 package telemetrydeck
 
 import (
@@ -57,6 +41,8 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -64,6 +50,11 @@ import (
 const (
 	// The TelemetryDeck Ingest v2 API endpoint we use
 	endpoint = "https://nom.telemetrydeck.com/v2/"
+
+	// defaultTimeout bounds one request of the default HTTP client: connecting,
+	// sending and reading the response. A hanging network therefore never holds
+	// a send, and with it a Flush or a SendSignalSync, longer than this.
+	defaultTimeout = 5 * time.Second
 
 	// modulePath is this library's module path, looked up in the consuming
 	// binary's build info to report which version of the SDK sent a signal.
@@ -106,6 +97,12 @@ type Client struct {
 	appVersion  string
 	buildNumber string
 	sdkVersion  string
+
+	// The sends SendSignal has in flight, for Flush: their number and a
+	// channel that is closed when it drops back to zero.
+	mu       sync.Mutex
+	inflight int
+	idle     chan struct{}
 }
 
 type SignalBody struct {
@@ -120,6 +117,10 @@ type SignalBody struct {
 // NewClient instantiates a new client to send data to TelemetryDeck, and
 // also starts a new session. The appID is the only required parameter.
 // Any number of optional parameters can be passed using the With...() functions.
+//
+// The client's HTTP requests time out after five seconds, so a program that
+// waits for delivery (Flush, SendSignalSync) is never held longer than that
+// by an unreachable network.
 func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 	if appID == "" {
 		return nil, ErrNoAppID
@@ -133,7 +134,7 @@ func NewClient(appID string, options ...func(*Client)) (*Client, error) {
 		sessionID:  uuid.New().String(),
 		userID:     defaultUid,
 		userIDHash: hashUserId(defaultUid, ""),
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: defaultTimeout},
 		sdkVersion: sdkNameAndVersion(),
 	}
 
@@ -238,9 +239,10 @@ func WithBuildNumber(buildNumber string) func(*Client) {
 
 // WithTestMode activates test mode.
 //
-// When set, data will be sent with isTestMode=true, to avoid
-// polluting production data. Also, errors will be logged that
-// would otherwise be silently ignored.
+// When set, data will be sent with isTestMode=true, to avoid polluting
+// production data. Also, a signal the endpoint rejects is logged together
+// with its request and response bodies (given a WithLogger), which the
+// production mode keeps to the one error line.
 //
 // To be used as an option parameter in the NewClient() func.
 func WithTestMode() func(*Client) {
@@ -310,12 +312,97 @@ func generateUserId() (id string) {
 //
 // The payload is a map of key-value pairs, containing the data you want to send.
 //
+// The request is sent from a goroutine and carries ctx: SendSignal returns as
+// soon as the request is built, and cancelling ctx abandons the delivery.
 // Errors that occur during submission of the request to TelemetryDeck are not
-// returned. Instead they are printed if the client has been configured with a logger
-// (see WithLogger).
+// returned. Instead they are printed if the client has been configured with a
+// logger (see WithLogger). Call Flush before the process exits to give the
+// delivery a bounded amount of time to finish.
 func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[string]interface{}) error {
+	request, body, err := c.newRequest(ctx, signalType, payload)
+	if err != nil {
+		return err
+	}
+
+	done := c.track()
+	go func() {
+		defer done()
+		if err := c.deliver(request, body); err != nil {
+			c.logf("error submitting %s: %s", signalType, err)
+		}
+	}()
+
+	return nil
+}
+
+// SendSignalSync sends a signal like SendSignal, but in the caller's
+// goroutine: it returns once TelemetryDeck has accepted the signal, or with
+// the error that prevented that, be it a transport failure, a rejecting
+// status, or ctx being done. A deadline on ctx bounds the wait. Use it where
+// one round trip at the end is affordable; SendSignal followed by Flush lets
+// the delivery overlap the program's own work instead.
+func (c *Client) SendSignalSync(ctx context.Context, signalType string, payload map[string]interface{}) error {
+	request, body, err := c.newRequest(ctx, signalType, payload)
+	if err != nil {
+		return err
+	}
+	return c.deliver(request, body)
+}
+
+// Flush waits until every signal SendSignal has handed to the network so far
+// has been delivered or has failed, or until ctx is done, whichever comes
+// first, and returns ctx.Err() in the latter case. A short-lived program
+// calls it before exiting, with a deadline that caps how long the exit may
+// take; a send still pending then continues in the background until the
+// process ends or the HTTP client's timeout strikes.
+func (c *Client) Flush(ctx context.Context) error {
+	c.mu.Lock()
+	idle, pending := c.idle, c.inflight > 0
+	c.mu.Unlock()
+	if !pending {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// track counts one send as in flight and returns the function that marks it
+// done; the idle channel is renewed when the count leaves zero and closed
+// when it returns there, so Flush can wait on it.
+func (c *Client) track() (done func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.inflight == 0 {
+		c.idle = make(chan struct{})
+	}
+	c.inflight++
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.inflight--
+		if c.inflight == 0 {
+			close(c.idle)
+		}
+	}
+}
+
+// newRequest builds the ingest request for one signal: the standard
+// parameters are injected into the payload, the signal is wrapped in the
+// array body the API expects, and the request carries ctx. The encoded body
+// is returned as well, for the diagnostics of a rejected signal.
+func (c *Client) newRequest(ctx context.Context, signalType string, payload map[string]interface{}) (*http.Request, []byte, error) {
 	if signalType == "" {
-		return ErrNoSignalType
+		return nil, nil, ErrNoSignalType
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	if payload == nil {
@@ -335,7 +422,7 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 		payload[paramVersionAndBuildNumber] = c.appVersion + " " + c.buildNumber
 	}
 
-	signal := &SignalBody{
+	signal := SignalBody{
 		AppID:      c.appID,
 		ClientUser: c.userIDHash,
 		SessionID:  c.sessionID,
@@ -345,47 +432,46 @@ func (c *Client) SendSignal(ctx context.Context, signalType string, payload map[
 	}
 
 	// Body must be an array of signals. We only send one signal at a time.
-	signals := []SignalBody{*signal}
-
-	body, err := json.Marshal(signals)
+	body, err := json.Marshal([]SignalBody{signal})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	request, err := http.NewRequest(http.MethodPost, c.endpoint, bytes.NewBuffer(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	return request, body, nil
+}
 
-	go func() {
-		response, err := c.httpClient.Do(request)
-		if err != nil {
-			if c.logger != nil {
-				c.logger.Printf("error submitting HTTP request: %s", err)
-			}
-		}
-		if response == nil {
-			if c.logger != nil {
-				c.logger.Printf("warning - telemetrydeck.Client.SendSignal resulted in no response")
-			}
-			return
-		}
-		if response.Body != nil {
-			defer func() { _ = response.Body.Close() }()
-		}
+// deliver performs one request and reports a failed transport (including a
+// context that ended first) or a rejecting status as an error. In test mode
+// the rejected request and the response body are logged as well.
+func (c *Client) deliver(request *http.Request, body []byte) error {
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
 
-		if response.StatusCode >= 400 && c.testMode && c.logger != nil {
-			c.logger.Printf("response status: %d", response.StatusCode)
-			c.logger.Printf("request body: %s", body)
-			bodyBytes, err := io.ReadAll(response.Body)
-			if err == nil {
-				c.logger.Printf("response body: %s", string(bodyBytes))
-			}
+	if response.StatusCode < http.StatusBadRequest {
+		return nil
+	}
+	if c.testMode {
+		c.logf("request body: %s", body)
+		if responseBody, err := io.ReadAll(response.Body); err == nil {
+			c.logf("response body: %s", responseBody)
 		}
-	}()
+	}
+	return fmt.Errorf("%s answered %s", c.endpoint, response.Status)
+}
 
-	return nil
+// logf prints to the configured logger, if any.
+func (c *Client) logf(format string, args ...interface{}) {
+	if c.logger != nil {
+		c.logger.Printf(format, args...)
+	}
 }
 
 // sdkNameAndVersion is the TelemetryDeck.SDK.nameAndVersion value:

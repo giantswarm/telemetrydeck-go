@@ -13,8 +13,10 @@ build, test and release details.
 - The user identifier leaves the machine only as a salted SHA-256 hash, and
   `generateUserId` stays deterministic for one machine and OS user.
 - `SendSignal` returns immediately and never returns a delivery error (errors go
-  to the optional logger). Changing that contract is a `feat!:`; a bounded wait
-  is an addition (#122).
+  to the optional logger). `Flush(ctx)` and `SendSignalSync(ctx, …)` are the
+  bounded waits: they return `ctx.Err()` when the deadline comes first and
+  never hold a caller past it; the default HTTP client times out on its own.
+  Changing any of these contracts is a `feat!:`.
 - Consumers keep the legacy `appVersion` payload key; the usage reports query it.
 - Dependencies are the standard library and `google/uuid`. A new one needs a
   reason in the PR.

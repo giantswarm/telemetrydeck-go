@@ -13,7 +13,10 @@ against an `httptest` server; nothing reaches TelemetryDeck.
   `pre-commit` check on a pull request.
 - Every parameter the client injects has a test; `telemetrydeck_appinfo_test.go`
   is the pattern: decode the request body the test server received and assert
-  on the payload keys.
+  on the payload keys. The delivery semantics (`Flush`, `SendSignalSync`, the
+  deadline, the caller's context, the client timeout) are covered in
+  `telemetrydeck_flush_test.go` with a server that holds a request until the
+  test releases it.
 
 ## Trying a change against the real ingest endpoint
 
@@ -26,9 +29,11 @@ client, _ := telemetrydeck.NewClient(appID,
     telemetrydeck.WithLogger(log.New(os.Stderr, "telemetry: ", 0)),
     telemetrydeck.WithAppVersion("dev"),
 )
-_ = client.SendSignal(ctx, "GiantSwarm.command", map[string]interface{}{"command": "probe"})
-time.Sleep(2 * time.Second) // SendSignal returns before the request is sent (#122)
+err := client.SendSignalSync(ctx, "GiantSwarm.command", map[string]interface{}{"command": "probe"})
 ```
+
+`SendSignalSync` returns once the endpoint has answered (or with the error);
+the fire-and-forget `SendSignal` followed by `Flush(ctx)` proves the same.
 
 `https://nom.telemetrydeck.com/v2/` answers `200 OK` to an accepted batch. The
 dashboard shows the signal only with its "Test Mode" toggle on, and ingestion
