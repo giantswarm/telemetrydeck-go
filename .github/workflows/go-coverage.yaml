@@ -3,7 +3,6 @@ on:
   pull_request:
   push:
     branches:
-      - fix-default-uid-hash # TODO: remove before merging
       # It's important that the action also runs on merge to main
       - main
 
