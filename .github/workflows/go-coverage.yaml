@@ -6,9 +6,16 @@ on:
       # It's important that the action also runs on merge to main
       - main
 
+permissions: {}
+
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    permissions:
+      # Comment on the pull request
+      pull-requests: write
+      # Push the coverage git notes (refs/notes/gocoverage)
+      contents: write
     steps:
     - name: Clone repository
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -20,7 +27,7 @@ jobs:
       uses: gwatts/go-coverage-action@2845595538a59d63d1bf55f109c14e104c6f7cb3 # v2.0.0
       id: coverage
       env:
-          GITHUB_TOKEN: "${{ secrets.TAYLORBOT_GITHUB_ACTION }}"
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
       with:
         # use fail-coverage to determine what should happen below this threshold
         fail-coverage: 1
